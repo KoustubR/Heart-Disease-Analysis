@@ -1,0 +1,273 @@
+---
+title: "Analysing factors affecting Heart Disease"
+author: "Koustub Raghavendra"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+# Include relevant packages here. You may add any extra ones you need.
+require(tidyverse)
+require(GGally)
+require(corrplot)
+require(kableExtra)
+require(tree)
+require(ggplot2)
+require(cowplot)
+```
+
+## About Dataset
+
+According to the Centre for Disease Control (CDC), heart disease is one of the leading causes of death for people of most races in the US (African Americans, American Indians and Alaska Natives, and white people). About half of all Americans (47%) have at least 1 of 3 key risk factors for heart disease: high blood pressure, high cholesterol, and smoking. Other key indicator include diabetic status, obesity (high BMI), not getting enough physical activity or drinking too much alcohol. Detecting and preventing the factors that have the greatest impact on heart disease is very important in healthcare. A large dataset was collected by the CDC and is a major part of the Behavioural Risk Factor Surveillance System (BRFSS), which conducts annual telephone surveys to gather data on the health status of U.S. residents.
+
+### Here's a brief explanation of each column in the dataset
+
+HeartDisease: Respondents that have ever reported having coronary heart disease(CHD) or myocardial infarction (MI). (Yes/No)
+
+BMI: Body mass index. (Numeric)
+
+Smoking: Have you smoked at least 100 cigarettes in your life? (Yes/No)
+
+AlcoholDrinking: Heavy drinkers (adult men having more than 14 drinks per week and adult women having more than 7 drinks per week). (Yes/No)
+
+Stroke: Ever had a stroke? (Yes/No)
+
+PhysicalHealth: Thinking about your physical health, which includes physical illness and injury, for how many days during the past 30 was your physical health not good? (Numeric)
+
+MentalHealth: Thinking about your mental health, for how many days during the past 30 was your physical health not good? (Numeric)
+
+Sex: Are you a man or woman?
+
+AgeCategory: What age are you? (13 levels)
+
+SleepTime: On average, how many hours of sleep do you get in a 24-hour period? (Numeric)
+
+```{r, include = FALSE}
+# Load in the data set. 
+data <- read.csv('HeartDiseaseData.csv')
+```
+
+## Exploratory analysis
+
+Let's start with our initial data exploration with our outcome variable. The data is collected as "Yes" or "No" which makes it a binary classification problem. When modelling, R will model **Yes** as 1 and **No** as 0. Let's see the distribution of our target variable:
+
+```{r}
+data |>
+  count(HeartDisease) |>
+  mutate(prop=round(prop.table(n),3), pct=round(prop.table(n),3)*100) |>
+  kable() |>
+  kable_styling()
+```
+
+We can see that we are dealing with an unbalanced data set with 72.3 % of observations of people having Heart Disease and 27.7% of people not having Heart Disease.
+
+Exploring the summary statistics for all numerical variables
+
+```{r}
+summary(data[c('BMI','PhysicalHealth','MentalHealth','SleepTime')]) |>
+  kable() |>
+  kable_styling()
+```
+
+From the above table we can comment on the following:
+
+**BMI** : The mean is slightly more than median which may suggest a slightly right skewed distribution.
+
+**Physical Health** : The mean is higher than the median suggesting a right skewed distribution.
+
+**Mental Health** : The mean is higher than the median suggesting a right skewed distribution.
+
+**Sleep Time** : The mean and median are close to each other which may suggest a symmetric distribution.
+
+Let's visualize the data to provide more insights on the distribution and correlation coefficients for all numerical variables.
+
+```{r}
+ggpairs(data = data[c('BMI','PhysicalHealth','MentalHealth','SleepTime')]) + theme_bw()
+```
+
+From the above plots we can see that conclusions we made from the summary table are fairly accurate. We can see there is a minimal association between the numerical variables, however there is a moderate association between the Mental Health and Physical Health **(r = 0.34)**.
+
+Let's now understand the bivariate properties of our numerical variables:
+
+```{r}
+ggpairs(data = data[c('BMI','PhysicalHealth','MentalHealth','SleepTime')], upper = list(continuous = "blank", discrete = "blank"), lower=list(continuous = "points", discrete="blank"), diag = list(continuous = "densityDiag", discrete="blankDiag"), ggplot2::aes(colour=data$HeartDisease)) + theme_bw()
+```
+
+From the above graphs we can see that the BMI is close to normal distribution and the rest are close to a bi-modal distribution.
+
+**Insights**:\
+Most of the individuals report few to zero days of poor physical health, we can see there is a secondary(flatter) distribution indicating there are few individuals who are frequently experiencing poor physical health. Similar to physical health mental health also have individuals who have reported few to zero days however there in no secondary distribution indicating that there are fewer individuals reporting frequent poor mental health days.
+
+```{r figures-side,fig.dim = c(4, 2), fig.show="hold", out.width="50%"}
+par(mar = c(4,2,.1,.1))
+ggplot(data=data, aes(x = HeartDisease, y = BMI)) + geom_boxplot() + theme_bw()
+ggplot(data=data, aes(x = HeartDisease, y = PhysicalHealth)) + geom_boxplot() + theme_bw()
+ggplot(data=data, aes(x = HeartDisease, y = MentalHealth)) + geom_boxplot() + theme_bw()
+ggplot(data=data, aes(x = HeartDisease, y = SleepTime)) + geom_boxplot() + theme_bw()
+```
+
+From the plots the **BMI** seems to have the largest difference (difference in median) between the two classes so it may be a useful predictor. We also see that the boxplot of **Physical Health** is not symmetrical which also indicates that it may be a useful predictor.
+
+The box plots of BMI and Sleep Time seems to be reasonably symmetric and the Physical Health and Mental Health are positively skewed.
+
+Let's now look at the categorical variables
+
+```{r, fig.dim = c(4, 2),fig.show="hold", out.width="50%"}
+ggplot(data, aes(x = HeartDisease, fill = HeartDisease)) +
+  geom_bar() +
+  facet_wrap(~ Smoking) +
+  labs(title = "Distribution of Heart Disease by Smoking") +
+  theme_bw()
+
+ggplot(data, aes(x = HeartDisease, fill = HeartDisease)) +
+  geom_bar() +
+  facet_wrap(~ AlcoholDrinking) +
+  labs(title = "Distribution of Heart Disease by Alcohol Drinking") +
+  theme_bw()
+
+ggplot(data, aes(x = HeartDisease, fill = HeartDisease)) +
+  geom_bar() +
+  facet_wrap(~ Stroke) +
+  labs(title = "Distribution of Heart Disease by Stroke") +
+  theme_bw()
+
+ggplot(data, aes(x = HeartDisease, fill = HeartDisease)) +
+  geom_bar() +
+  facet_wrap(~ Sex) +
+  labs(title = "Distribution of Heart Disease by Sex") +
+  theme_bw()
+```
+
+```{r}
+
+ggplot(data, aes(x = HeartDisease, fill = HeartDisease)) + geom_bar() + facet_wrap(~ AgeCategory) + labs(title = "Distribution of Heart Disease by Age Category") + theme_bw()
+
+```
+
+From the above distribution Alcohol Consumption may not be a good factor because of how imbalanced the data is and for the very few data we have on people who consume alcohol have nearly an equal distribution between the two classes.
+
+## Formal analysis
+
+**Model 1: Logistic Regression**
+
+In logistic regression we predict the probabilities of the event of interest occurring in our case the event of interest is person having Heart Disease. Logistic regression is a generalized linear model with random component in this case as binomial distribution.
+
+The fitted logistic regression model is:
+
+$( P(Y=1|X) = \frac{1}{1 + e^{-(\beta_0 + \beta_1X_1 + \beta_2X_2 + \ldots + \beta_pX_p)}} )$
+
+where P is the predicted probability of success.
+
+For an imbalanced data-set or data-set containing outliers the sigmoid function squashes the outliers towards zero or one which makes it an optimal choice.
+
+```{r}
+# Logistic Regression
+LogisticRegression <- glm(factor(HeartDisease) ~ BMI + factor(Smoking) + factor(AlcoholDrinking) + factor(Stroke) + PhysicalHealth + MentalHealth + factor(Sex) + factor(AgeCategory) + SleepTime, data, family = binomial)
+
+reducedLogisticRegression <- glm(factor(HeartDisease) ~ BMI + factor(Smoking) + factor(AlcoholDrinking) + factor(Stroke) + PhysicalHealth + MentalHealth + factor(Sex) + SleepTime, data, family = binomial)
+anova(reducedLogisticRegression, LogisticRegression, test = "Chisq")
+summary(LogisticRegression)
+```
+
+Examining the p-value from the above summary table we can see that all the variables apart from the Age Category 25-29 and Age Category 30-34 have values less than 0.05. Since it is a categorical variable we check the statistical significance by performing a likelihood ratio test.
+
+We can see that the p-value of the likelihood ratio test is less than 0.05 which indicates that the Age category is statistically significant. To interpret the results of the logistic regression model we calculate the odds ratio.\
+$( e^{b_i})$ is the estimated odds ratio associated with increasing the independent variable ${x_i}$ by one unit, controlling for all other variables in the model.
+
+```{r}
+round(exp(coef(LogisticRegression)),3) |>
+  kable() |>
+  kable_styling() |>
+  scroll_box(height = "200px")
+```
+
+**BMI**: For unit increase in BMI, the odds of having a heart disease increase by a factor of 1.047
+
+**Smoking**: The odds of having heart disease for a person who smokes are 1.720 times more compared to a person who doesn't smoke
+
+**Alcohol Consumption**: The odds of having a heart disease for a person who drinks alcohol is 0.611 times lower compared to a person who doesn't drink
+
+**Stroke**: The odds of having a heart disease for individuals who had stroke are 5.453 times higher compared to those who didn't have stroke
+
+**Physical Health**: For a day increase in having a bad physical health the odds of having heart disease increases by a factor of 1.037
+
+**Mental Health**: For a day increase in having a bad mental health the odds of having heart disease increases by a factor of 1.015
+
+**Sex**: The odds of having heart disease for a male is 1.898 times higher compared to females
+
+**Age Category**: Each age category has its own odds ratio compared to 18-24 category. For example the odds of having heart disease for people who are 80 or older is 67.052 times higher compared to people who are in the range 18-24 and so on.
+
+**Sleep Time**: For an hour increase in sleep time, the odds of having a heart disease decrease by a factor of 0.945
+
+**Misclassification Rate:** The Misclassification error tells us how many instances are misclassified in the data set. It is obtained by dividing the total number of misclassified instance by the total number of instances which for our model is 19% as calculated below.
+
+```{r}
+predicted_probs <- predict(LogisticRegression, type = "response")
+binary_predictions <- ifelse(predicted_probs >= 0.5, 1, 0)
+actual_labels <- ifelse(data$HeartDisease == "Yes", 1, 0)
+misclassification_rate <- mean(binary_predictions != actual_labels)
+print(misclassification_rate)
+logistic_confusion_matrix <- table(actual_labels, binary_predictions)
+print(logistic_confusion_matrix)
+precision_log <- logistic_confusion_matrix[2, 2] / sum(logistic_confusion_matrix[, 2])
+cat("Precision of Logistic Regression is:", precision_log, "\n")
+```
+
+**Model 2: Classification Tree**
+
+Classification tree is a hierarchical tree like structure composed of node and branches. Each node represents a decision.
+
+The construction of decision tree for binary classification involves the following steps:
+
+1.  Selection of Root node: It is selected from information gain which is given by\
+    $IG = \text{Entropy(parent)} - \sum_{i} \left( \frac{N_i}{N} \times \text{Entropy(child}_i) \right)$\
+    The variable with the highest information gain is considered as a root node
+2.  For every split check if it's a pure split or an impure split.\
+    Pure split: When the split cannot be further split. It will become a leaf node\
+    Impure split: When the split can be further split.\
+    \
+    To calculate the pure and impure split mathematically we use two concepts.
+    a.  Entropy: $Entropy(p) = - (p \cdot \log_2(p) + (1 - p) \cdot \log_2(1 - p))$\
+        A pure split is when the entropy is zero and an impure split is for higher entropy values. if entropy is 1 it is a complete impure split
+    b.  Gini Impurity: $Gini(p) = 1 - (p^2 + (1 - p)^2)$\
+        For pure split the Gini impurity values are 0 and 1, for complete impure split it is 0.5
+3.  For every impure split, split further until the leaf nodes are found.
+
+```{r}
+# Classification Tree
+
+ClassificationTree <- tree(factor(HeartDisease) ~ BMI + factor(Smoking) + factor(AlcoholDrinking) + factor(Stroke) + PhysicalHealth + MentalHealth + factor(Sex) + factor(AgeCategory) + SleepTime, data)
+
+summary(ClassificationTree)
+
+tree_predictions <- predict(ClassificationTree, type = "class")
+confusion_matrix_tree <- table(actual_labels, tree_predictions)
+print(confusion_matrix_tree)
+
+precision_tree <- confusion_matrix_tree[2, 2] / sum(confusion_matrix_tree[, 2])
+cat("Precision of decision tree is:", precision_tree, "\n")
+```
+
+From the above summary of our decision tree we can see that the factors/ variables selected for predicting whether a person has a heart disease or not are Age category, Physical Health and Stroke. The number of leaf nodes of the constructed decision tree is 6. The Misclassification error tells us how many instances are misclassified in the data set. It is obtained by dividing the total number of misclassified instance by the total number of instances which for our model is 20.65%.
+
+```{r}
+ClassificationTree
+```
+
+Here we can see the split criteria, the number of observations in that branch, the deviance, the overall prediction for the branch, and the probability of observations in that branch that take on values of each class. Branches that lead to terminal nodes are indicated using asterisks. To interpret the results better we can plot the decision tree.
+
+```{r}
+plot(ClassificationTree)
+text(ClassificationTree, pretty=0)
+```
+
+From the above plot we can see that the Age Category is the root node which reflects it has the highest information gain. For people who are in the age category 18-24, 25-29, 30-34, 35-39, 40-44 and45-49 it further splits to check if their physical health was not good for more than 7 days, if not a person the decision tree predicts he is not likely to have a heart disease and vice versa. For people who are not in the above age categories it further requires information on whether the person has had a stroke or not and based on this further predictions can be made.
+
+## Conclusions
+
+**Logistic Regression**: We modeled the probability of presence of heard disease as a function of various factors present in our data set. The coefficients indicate the strength and direction of the relationship between each factor and the likelihood of the heart disease. For the trained logistic regression model we could see that all the factors are statistically significant i.e. all the independent variables present in our data set influences whether a person has a heart disease or not.\
+\
+**Decision Tree**: We partitioned the feature space into distinct regions. Each terminal node in the decision tree represents whether the presence or absence of heart disease and the tree structure is determined by recursively partitioning the data set. For the trained decision tree we could see that out of all the independent variables only Age category, Physical health and Stroke are considered to influence whether a person has heart disease or not this is based on the information gain values of each factors.
+
+**Performance**: Based on the misclassification rate, confusion matrix and the precision we can see that logistic regression slightly outperforms the classification decision tree. The logistic regression assumes a linear relationship between the factors and the log odds of the outcome but the decision tree captures non linear relationships more effectively.
